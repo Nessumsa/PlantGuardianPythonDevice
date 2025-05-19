@@ -9,24 +9,19 @@ from RPLCD.i2c import CharLCD
 import datetime
 import json
 import spidev
-import bluetooth
-
-
-#Search for the tag 'NEEDS IMPLEMENTATION' to check if anything needs to be coded.
-
 
 #Defining variables
-PlantID = '682aeec2b1ddfd70fed67e96' #This should be sent from the server
-MoistureLimit = 20 #This should be sent from the server
-AllowedDryPeriod = 0 #This should be sent from the server
-RequiredWaterAmount = 0 #This should be sent from the server
+PlantID = '0' #This is loaded from settingsfile
+MoistureLimit = 0 #This is loaded from settingsfile
+AllowedDryPeriod = 0 #This is loaded from settingsfile
+RequiredWaterAmount = 0 #This is loaded from settingsfile
 LastWatered = 0
 WaterStatus = 0
 NewInput = False
 Metric = {}
 InitializationDone = False #Bool used for checking initialization
 SetupDone = False #Bool used for checking if connection is set up
-Url = 'http://10.176.69.183:3000' #This should be sent from the server
+Url = 'http://10.176.69.183:3000' #This should be sent via bluetooth
 MessageQueue = queue.Queue()
 
 #Defining messages
@@ -49,15 +44,14 @@ WATER_SENSOR_PIN = 16
 PUMP_PIN = 24
 
 #GPIO setup
-GPIO.setwarnings(False)          # Slår GPIO advarsler fra
-GPIO.setmode(GPIO.BCM)           # Bruger Broadcom pin-nummerering
+GPIO.setwarnings(False)
+GPIO.setmode(GPIO.BCM)
 
-# Initialisering af output-pins
-
+# Initialization of output-pins
 GPIO.setup(PUMP_PIN, GPIO.OUT)
 GPIO.output(PUMP_PIN, GPIO.HIGH)
 
-# Initialisering af input-pins
+# Initialization of input-pins
 GPIO.setup(RESET_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(WATER_SENSOR_PIN, GPIO.IN)
 
@@ -82,8 +76,8 @@ def connect():
 def disconnect():
     queue_message(message=MessageDisconnect, duration=2)
 
-@client.on("send_iot_conf")
-def save_settings(config):
+@client.on('iot_config_new_data')
+def on_new_data(config):
     with open(SETTINGS_FILE, "w") as f:
         json.dump(config, f, indent=2)
     load_settings()
@@ -226,35 +220,10 @@ listener_thread = threading.Thread(target=start_socketio, daemon=True)
 reset_thread = threading.Thread(target=hard_reset_program, daemon=True)
 exit_event = threading.Event()
 
-def setupConnection():
-    global Url
-    global SetupDone
-    init_display()
-    server_sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-    port = 1  # Standard port for RFCOMM
-    server_sock.bind(("", port))
-    server_sock.listen(1)
-
-    lcd.write_string(f"Waiting for Bluetooth connection on RFCOMM channel {port}")
-
-    client_sock, client_info = server_sock.accept()
-    lcd.write_string(f"Accepted connection from {client_info}")
-    time.sleep(2)
-    try:
-        data = client_sock.recv(1024)  # Receive up to 1024 bytes
-        if data:
-            Url = data.decode('utf-8')
-            lcd.write_string(f"Received URL: {Url}")
-    finally:
-        SetupDone = True
-        lcd.clear()
-        client_sock.close()
-        server_sock.close()
-
 def initialization():
     global InitializationDone
     init_display()
-    #load_settings()
+    load_settings()
     message_queue_thread.start()
     reset_thread.start()
     listener_thread.start()
@@ -287,8 +256,6 @@ def loop():
 
 
 if __name__ == "__main__":
-    # if SetupDone == False:
-    #     setupConnection()
     if InitializationDone == False:
         initialization()
     loop()
