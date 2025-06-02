@@ -18,6 +18,7 @@ RequiredWaterAmount = 0 #This is loaded from settingsfile
 LastWatered = 0
 WaterStatus = 0
 NewInput = False
+firstLoop = True
 Metric = {}
 InitializationDone = False #Bool used for checking initialization
 SetupDone = False #Bool used for checking if connection is set up
@@ -36,9 +37,6 @@ MessageResetProgram = 'Restarting the application now.'
 MessageShutdown = 'Shutting down.'
 
 #PIN setup
-GREEN_PIN = 0
-BOARD_SCL_PIN = 0
-BOARD_SDA_PIN = 0
 RESET_BUTTON_PIN = 21
 WATER_SENSOR_PIN = 16
 PUMP_PIN = 24
@@ -96,10 +94,10 @@ def init_display():
 def scroll_message(message, duration, lcd, delay=0.3):
     if len(message) <= 32:
         lcd.clear()
-        lcd.write_string(message[:16])  # Linje 1
+        lcd.write_string(message[:16])  
         if len(message) > 16:
             lcd.cursor_pos = (1, 0)
-            lcd.write_string(message[16:32])  # Linje 2
+            lcd.write_string(message[16:32])  
         time.sleep(duration)
     else:
         padded_msg = message + " " * 16
@@ -158,9 +156,6 @@ def hard_reset_program():
                     shutdown(restart=True)
         time.sleep(0.1)  
 
-def clear_display():
-    lcd.clear()
-
 def shutdown(restart=False):
     queue_message(message=MessageShutdown, duration=5)
     GPIO.cleanup()
@@ -174,6 +169,9 @@ def shutdown(restart=False):
         os.execv(sys.executable, [sys.executable] + sys.argv)
     else:
         sys.exit(0)
+
+def clear_display():
+    lcd.clear()
 
 #Water tank functions
 def measure_water_level():
@@ -214,6 +212,23 @@ def measure_moisture() -> float:
     percent = 100 - ((raw / 1023) * 100)
     return round(percent, 1)
 
+#Loop timing methods
+def wait_until_next_run():
+    now = datetime.datetime.now()
+    today_8 = now.replace(hour=8, minute=0, second=0, microsecond=0)
+    today_20 = now.replace(hour=20, minute=0, second=0, microsecond=0)
+
+    if now < today_8:
+        wait_time = (today_8 - now).total_seconds()
+    elif now < today_20:
+        wait_time = (today_20 - now).total_seconds()
+    else:
+        wait_time = ((today_8 + datetime.timedelta(days=1)) - now).total_seconds()
+
+    time.sleep(wait_time)
+
+
+
 #Threads setup
 message_queue_thread = threading.Thread(target=queue_handler, daemon=True)
 listener_thread = threading.Thread(target=start_socketio, daemon=True)
@@ -236,20 +251,26 @@ def loop():
     global PlantID
     global LastWatered
     global WaterStatus
+    global firstLoop
+
     while True:
-        time.sleep(10)
-        
-        MoistureMeasurement = measure_moisture()
-        print(f"Moisture Measurement: {MoistureMeasurement}")  # Debug line
-        CurrentDate = datetime.datetime.now().isoformat()
+        if not firstLoop:
+            wait_until_next_run()
+        else:
+            firstLoop = False
+
         try:
+            MoistureMeasurement = measure_moisture()
+            CurrentDate = datetime.datetime.now().isoformat()
+
             if MoistureMeasurement < MoistureLimit:
-                print("Moisture below limit. Activating pump.")  # Debug line
-                pump_water(2)
+                pump_water(3)
                 LastWatered = datetime.datetime.now().isoformat()
             else:
                 check_water_tank()
-            send_metric(metric_creator(PlantId=PlantID, TimeStamp=CurrentDate, Moisture=MoistureMeasurement, LastWatered=LastWatered, WaterStatus=WaterStatus))
+
+            send_metric(metric_creator(PlantId=PlantID,TimeStamp=CurrentDate,Moisture=MoistureMeasurement,LastWatered=LastWatered,WaterStatus=WaterStatus))
+
         except Exception as e:
             print(e)
             client.send(f"Exception: {e}")
